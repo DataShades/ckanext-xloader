@@ -165,6 +165,7 @@ class xloaderPlugin(plugins.SingletonPlugin):
             'xloader_submit': action.xloader_submit,
             'xloader_hook': action.xloader_hook,
             'xloader_status': action.xloader_status,
+            'task_status_update': action.task_status_update
             }
 
     # IAuthFunctions
