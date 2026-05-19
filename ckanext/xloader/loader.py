@@ -777,7 +777,7 @@ def _enable_fulltext_trigger(connection, resource_id):
 
 
 def _get_rows_count_of_resource(connection, table):
-    count_query = ''' SELECT count(_id) from {table} '''.format(table=table)
+    count_query = sa.text(''' SELECT count(_id) from {table} '''.format(table=table))
     results = connection.execute(count_query)
     rows_count = int(results.first()[0])
     return rows_count
@@ -830,7 +830,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
         for start in range(0, rows_count, chunks):
             try:
                 # Build SQL to update _full_text column with concatenated searchable content
-                sql = \
+                sql = sa.text(
                     '''
                     UPDATE {table}
                     SET _full_text = to_tsvector({cols}) WHERE _id BETWEEN {first} and {end};
@@ -848,7 +848,7 @@ def _populate_fulltext(connection, resource_id, fields, logger):
                         ),
                         first=start,
                         end=start + chunks
-                    )
+                    ))
                 connection.execute(sql)
                 logger.info("Indexed rows {first} to {end} of {total}".format(
                     first=start, end=min(start + chunks, rows_count), total=rows_count))

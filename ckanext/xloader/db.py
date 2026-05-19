@@ -121,7 +121,7 @@ def get_job(job_id):
 
     # Turn the result into a dictionary representation of the job.
     result_dict = {}
-    for field in list(result.keys()):
+    for field in [c.name for c in JOBS_TABLE.c]:
         value = getattr(result, field)
         if value is None:
             result_dict[field] = value
@@ -448,14 +448,17 @@ def _get_metadata(job_id):
 
     with ENGINE.connect() as conn:
         results = conn.execute(
-            METADATA_TABLE.select().where(
+            METADATA_TABLE.select().with_only_columns(
+                METADATA_TABLE.c.key,
+                METADATA_TABLE.c.value,
+                METADATA_TABLE.c.type,
+            ).where(
                 METADATA_TABLE.c.job_id == job_id)).fetchall()
     metadata = {}
-    for row in results:
-        value = row['value']
-        if row['type'] == 'json':
+    for (key, value, value_type) in results:
+        if value_type == 'json':
             value = json.loads(value)
-        metadata[row['key']] = value
+        metadata[key] = value
     return metadata
 
 
