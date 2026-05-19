@@ -1,12 +1,20 @@
 import pytest
-import mock
+from ckan.plugins import toolkit
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
+from ckan.plugins.toolkit import NotAuthorized
 from ckan.tests import helpers, factories
+
+from ckanext.xloader.utils import get_xloader_user_apitoken
 
 
 @pytest.mark.usefixtures("clean_db", "with_plugins")
 @pytest.mark.ckan_config("ckan.plugins", "datastore xloader")
 class TestAction(object):
+
     def test_submit(self):
         # checks that xloader_submit enqueues the resource (to be xloadered)
         user = factories.User()
@@ -24,6 +32,39 @@ class TestAction(object):
                 resource_id=res["id"],
             )
             assert 1 == enqueue_mock.call_count
+            assert enqueue_mock.call_args[1].get('queue') == 'default{}'.format(ord(res['package_id'][0]) % 2)
+
+    def test_submit_nonexistent_resource(self):
+        user = factories.User()
+        with mock.patch(
+            "ckanext.xloader.action.enqueue_job",
+            return_value=mock.MagicMock(id=123),
+        ) as enqueue_mock:
+            assert helpers.call_action(
+                "xloader_submit",
+                context=dict(user=user["name"]),
+                resource_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+            ) is False
+            assert enqueue_mock.call_count == 0
+
+    def test_submit_to_custom_queue_without_auth(self):
+        # check that xloader_submit doesn't allow regular users to change queues
+        user = factories.User()
+        with pytest.raises(NotAuthorized):
+            helpers.call_auth(
+                "xloader_submit",
+                context=dict(user=user["name"], model=None),
+                queue='foo',
+            )
+
+    def test_submit_to_custom_queue_as_sysadmin(self):
+        # check that xloader_submit allows sysadmins to change queues
+        user = factories.Sysadmin()
+        assert helpers.call_auth(
+            "xloader_submit",
+            context=dict(user=user["name"], model=None),
+            queue='foo',
+        ) is True
 
     def test_duplicated_submits(self):
         def submit(res, user):
@@ -90,4 +131,28 @@ class TestAction(object):
             resource_id=res["id"],
         )
 
-        assert status['status'] == 'pending'
+        assert status["status"] == "pending"
+
+    def test_xloader_user_api_token_from_config(self):
+        sysadmin = factories.SysadminWithToken()
+        apikey = sysadmin["token"]
+        with mock.patch.dict(toolkit.config, {'ckanext.xloader.api_token': apikey}):
+            api_token = get_xloader_user_apitoken()
+            assert api_token == apikey
+
+    @pytest.mark.ckan_config("ckanext.xloader.api_token", "NOT_SET")
+    def test_xloader_user_api_token_from_config_should_throw_exceptio_when_not_set(self):
+
+        hasNotThrownException = True
+        try:
+            get_xloader_user_apitoken()
+        except Exception:
+            hasNotThrownException = False
+
+        assert not hasNotThrownException
+
+    @pytest.mark.ckan_config("ckanext.xloader.api_token", "random-api-token")
+    def test_xloader_user_api_token(self):
+        api_token = get_xloader_user_apitoken()
+
+        assert api_token == "random-api-token"

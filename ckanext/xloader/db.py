@@ -39,8 +39,8 @@ def init(config, echo=False):
     global ENGINE, _METADATA, JOBS_TABLE, METADATA_TABLE, LOGS_TABLE
     db_uri = config.get('ckanext.xloader.jobs_db.uri',
                         'sqlite:////tmp/xloader_jobs.db')
-    ENGINE = sqlalchemy.create_engine(db_uri, echo=echo, convert_unicode=True)
-    _METADATA = sqlalchemy.MetaData(ENGINE)
+    ENGINE = sqlalchemy.create_engine(db_uri, echo=echo)
+    _METADATA = sqlalchemy.MetaData()
     JOBS_TABLE = _init_jobs_table()
     METADATA_TABLE = _init_metadata_table()
     LOGS_TABLE = _init_logs_table()
@@ -111,8 +111,10 @@ def get_job(job_id):
     if job_id:
         job_id = six.text_type(job_id)
 
-    result = ENGINE.execute(
-        JOBS_TABLE.select().where(JOBS_TABLE.c.job_id == job_id)).first()
+    with ENGINE.connect() as conn:
+        result = conn.execute(
+            JOBS_TABLE.select().where(JOBS_TABLE.c.job_id == job_id)
+        ).first()
 
     if not result:
         return None
@@ -191,14 +193,12 @@ def add_pending_job(job_id, job_type, api_key,
     if not metadata:
         metadata = {}
 
-    conn = ENGINE.connect()
-    trans = conn.begin()
-    try:
+    with ENGINE.begin() as conn:
         conn.execute(JOBS_TABLE.insert().values(
             job_id=job_id,
             job_type=job_type,
             status='pending',
-            requested_timestamp=datetime.datetime.now(),
+            requested_timestamp=datetime.datetime.utcnow(),
             sent_data=data,
             result_url=result_url,
             api_key=api_key))
@@ -225,12 +225,6 @@ def add_pending_job(job_id, job_type, api_key,
             )
         if inserts:
             conn.execute(METADATA_TABLE.insert(), inserts)
-        trans.commit()
-    except Exception:
-        trans.rollback()
-        raise
-    finally:
-        conn.close()
 
 
 class InvalidErrorObjectError(Exception):
@@ -306,10 +300,11 @@ def _update_job(job_id, job_dict):
     if "data" in job_dict:
         job_dict["data"] = six.text_type(job_dict["data"])
 
-    ENGINE.execute(
-        JOBS_TABLE.update()
-        .where(JOBS_TABLE.c.job_id == job_id)
-        .values(**job_dict))
+    with ENGINE.begin() as conn:
+        conn.execute(
+            JOBS_TABLE.update()
+            .where(JOBS_TABLE.c.job_id == job_id)
+            .values(**job_dict))
 
 
 def mark_job_as_completed(job_id, data=None):
@@ -325,7 +320,7 @@ def mark_job_as_completed(job_id, data=None):
     update_dict = {
         "status": "complete",
         "data": json.dumps(data),
-        "finished_timestamp": datetime.datetime.now(),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
@@ -340,7 +335,7 @@ def mark_job_as_missed(job_id):
     update_dict = {
         "status": "error",
         "error": "Job delayed too long, service full",
-        "finished_timestamp": datetime.datetime.now(),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
@@ -359,7 +354,7 @@ def mark_job_as_errored(job_id, error_object):
     update_dict = {
         "status": "error",
         "error": error_object,
-        "finished_timestamp": datetime.datetime.now(),
+        "finished_timestamp": datetime.datetime.utcnow(),
     }
     _update_job(job_id, update_dict)
 
@@ -451,9 +446,10 @@ def _get_metadata(job_id):
     # warnings.
     job_id = six.text_type(job_id)
 
-    results = ENGINE.execute(
-        METADATA_TABLE.select().where(
-            METADATA_TABLE.c.job_id == job_id)).fetchall()
+    with ENGINE.connect() as conn:
+        results = conn.execute(
+            METADATA_TABLE.select().where(
+                METADATA_TABLE.c.job_id == job_id)).fetchall()
     metadata = {}
     for row in results:
         value = row['value']
@@ -469,8 +465,9 @@ def _get_logs(job_id):
     # warnings.
     job_id = six.text_type(job_id)
 
-    results = ENGINE.execute(
-        LOGS_TABLE.select().where(LOGS_TABLE.c.job_id == job_id)).fetchall()
+    with ENGINE.connect() as conn:
+        results = conn.execute(
+            LOGS_TABLE.select().where(LOGS_TABLE.c.job_id == job_id)).fetchall()
 
     results = [dict(result) for result in results]
 

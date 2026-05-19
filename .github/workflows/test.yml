@@ -1,34 +1,49 @@
+---
 name: Tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+    branches:
+      - master
+  workflow_call:
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.6'
+          python-version: '3.10'
       - name: Install requirements
         run: pip install flake8 pycodestyle
       - name: Check syntax
         run: flake8 . --count --select=E901,E999,F821,F822,F823 --show-source --statistics --extend-exclude ckan
-      #- name: Run flake8
-      #  run: flake8 . --count --max-line-length=127 --statistics --exclude ckan
 
   test:
     needs: lint
     strategy:
       matrix:
-        ckan-version: ["2.10", 2.9, 2.9-py2, 2.8, 2.7]
+        include: #ckan-image see https://github.com/ckan/ckan-docker-base, ckan-version controls other image tags
+          - ckan-version: "2.11"
+            ckan-image: "2.11-py3.10"
+            experimental: false
+          - ckan-version: "2.10"
+            ckan-image: "2.10-py3.10"
+            experimental: false
+          - ckan-version: "master"
+            ckan-image: "master"
+            experimental: true  # master is unstable, good to know if we are compatible or not
       fail-fast: false
 
-    name: CKAN ${{ matrix.ckan-version }}
+    name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} CKAN ${{ matrix.ckan-version }}
     runs-on: ubuntu-latest
     container:
-      image: openknowledge/ckan-dev:${{ matrix.ckan-version }}
+      image: ckan/ckan-dev:${{ matrix.ckan-image }}
+      options: --user root
     services:
       solr:
-        image: ckan/ckan-solr:${{ matrix.ckan-version }}
+        image: ckan/ckan-solr:${{ matrix.ckan-version }}-solr9
       postgres:
         image: ckan/ckan-postgres-dev:${{ matrix.ckan-version }}
         env:
@@ -39,7 +54,7 @@ jobs:
           - 5432:5432
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
       redis:
-          image: redis:3
+          image: redis:7
     env:
       CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
       CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
@@ -48,28 +63,67 @@ jobs:
       CKAN_REDIS_URL: redis://redis:6379/1
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Install requirements
+    - uses: actions/checkout@v4
+      continue-on-error: ${{ matrix.experimental }}
+
+    - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Install requirements
+      continue-on-error: ${{ matrix.experimental }}
       run: |
         pip install -r requirements.txt
-        pip install -r pip-requirements.txt
         pip install -r dev-requirements.txt
         pip install -e .
         pip install -U requests[security]
         # Replace default path to CKAN core config file with the one on the container
         sed -i -e 's/use = config:.*/use = config:\/srv\/app\/src\/ckan\/test-core.ini/' test.ini
-    - name: Setup extension (CKAN >= 2.9)
-      if: ${{ matrix.ckan-version != '2.7' && matrix.ckan-version != '2.8' }}
+
+    - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Setup extension
+      continue-on-error: ${{ matrix.experimental }}
       run: |
         ckan -c test.ini db init
-    - name: Setup extension (CKAN 2.8)
-      if: ${{ matrix.ckan-version == '2.8' }}
+        ckan -c test.ini user add ckan_admin email=ckan_admin@localhost password="AbCdEf12345!@#%"
+        ckan -c test.ini sysadmin add ckan_admin
+        ckan config-tool test.ini "ckanext.xloader.api_token=$(ckan -c test.ini user token add ckan_admin xloader | tail -n 1 | tr -d '\t')"
+        ckan -c test.ini user list
+
+    - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Run tests
+      continue-on-error: ${{ matrix.experimental }}
+      run: pytest --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests --junit-xml=/tmp/artifacts/junit/results.xml
+
+    - name: ${{ matrix.experimental && '**Fail_Ignored** ' || '' }} Test Summary
+      uses: test-summary/action@v2
+      continue-on-error: ${{ matrix.experimental }}
+      with:
+        paths: "/tmp/artifacts/junit/*.xml"
+      if: always()
+
+    - name: Install packages required for codecov
+      continue-on-error: ${{ matrix.experimental }}
+      if: ${{ !cancelled() }}
       run: |
-        paster --plugin=ckan db init -c test.ini
-    - name: Setup extension (CKAN 2.7)
-      if: ${{ matrix.ckan-version == '2.7' }}
-      run: |
-        psql -d postgresql://datastore_write:pass@postgres/datastore_test -f full_text_function.sql
-        paster --plugin=ckan db init -c test.ini
-    - name: Run tests
-      run: pytest --ckan-ini=test.ini --cov=ckanext.xloader --disable-warnings ckanext/xloader/tests
+        #ubuntu based images
+        apt-get update
+        apt-get install -y --no-install-recommends curl gpg
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      if: ${{ !cancelled() }}
+      continue-on-error: ${{ matrix.experimental }}
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: false # optional (default = false)
+
+    - name: Get Cover
+      uses: orgoro/coverage@3f13a558c5af7376496aa4848bf0224aead366ac  # v3.2
+      if: ${{ !cancelled() }}
+      continue-on-error: ${{ matrix.experimental }}
+      with:
+        coverageFile: coverage.xml
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload test results to Codecov
+      uses: codecov/test-results-action@v1
+      if: ${{ !cancelled() }}
+      continue-on-error: ${{ matrix.experimental }}
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        verbose: false  # optional (default = false)
