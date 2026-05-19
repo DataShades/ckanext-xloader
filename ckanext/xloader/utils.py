@@ -273,7 +273,7 @@ def set_resource_metadata(update_dict):
         for resource in solr_data_dict['resources']:
             if resource['id'] == update_dict['resource_id']:
                 resource.update(update_dict)
-                psi.index_package(solr_data_dict)
+                psi.index_package(dict(solr_data_dict, with_custom_schema=solr_data_dict))
                 break
 
 

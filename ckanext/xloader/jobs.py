@@ -294,6 +294,7 @@ def xloader_data_into_datastore_(input, job_dict, logger):
                 fields=fields,
                 resource_id=resource['id'],
                 logger=logger)
+
             update_resource(resource={'id': resource['id'], 'hash': resource['hash']},
                             patch_only=True)
             logger.info('File Hash updated for resource: %s', resource['hash'])
