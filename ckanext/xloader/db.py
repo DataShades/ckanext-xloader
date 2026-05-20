@@ -472,7 +472,7 @@ def _get_logs(job_id):
         results = conn.execute(
             LOGS_TABLE.select().where(LOGS_TABLE.c.job_id == job_id)).fetchall()
 
-    results = [dict(result) for result in results]
+    results = [dict(result._mapping) for result in results]
 
     for result in results:
         result.pop("job_id")
