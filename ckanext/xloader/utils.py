@@ -245,36 +245,9 @@ def set_resource_metadata(update_dict):
     # race condition, see issue #3245 for details and plan for a
     # better fix
 
-    q = model.Session.query(model.Resource). \
-        with_for_update(of=model.Resource). \
-        filter(model.Resource.id == update_dict['resource_id'])
-    resource = q.one()
-
-    # update extras in database for record
-    extras = resource.extras
-    extras.update(update_dict)
-    q.update({'extras': extras}, synchronize_session=False)
-
-    model.Session.commit()
-
-    # get package with updated resource from solr
-    # find changed resource, patch it and reindex package
-    psi = search.PackageSearchIndex()
-    solr_query = search.PackageSearchQuery()
-    q = {
-        'q': 'id:"{0}"'.format(resource.package_id),
-        'fl': 'data_dict',
-        'wt': 'json',
-        'fq': 'site_id:"%s"' % tk.config.get('ckan.site_id'),
-        'rows': 1
-    }
-    for record in solr_query.run(q)['results']:
-        solr_data_dict = json.loads(record['data_dict'])
-        for resource in solr_data_dict['resources']:
-            if resource['id'] == update_dict['resource_id']:
-                resource.update(update_dict)
-                psi.index_package(dict(solr_data_dict, with_custom_schema=solr_data_dict))
-                break
+    user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    patch = dict(update_dict, id=update_dict["resource_id"])
+    tk.get_action("resource_patch")({"user": user["name"]}, patch)
 
 
 def column_count_modal(rows):
