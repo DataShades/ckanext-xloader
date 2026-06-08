@@ -440,7 +440,8 @@ def load_csv(csv_filepath, resource_id, mimetype='text/csv', allow_type_guessing
 
         # Create table
         from ckan import model
-        context = {'model': model, 'ignore_auth': True}
+        user = p.toolkit.get_action("get_site_user")({"ignore_auth": True}, {})
+        context = {'model': model, 'ignore_auth': True, "user": user["name"]}
         data_dict = dict(
             resource_id=resource_id,
             fields=fields,
