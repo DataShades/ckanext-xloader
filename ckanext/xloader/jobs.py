@@ -385,7 +385,7 @@ def _download_resource_data(resource, data, api_key, logger):
     cl = None
     try:
         headers = {}
-        if resource.get('url_type') == 'upload':
+        if resource.get('url_type') in ('upload', 'file'):
             # If this is an uploaded file to CKAN, authenticate the request,
             # otherwise we won't get file from private resources
             headers[apitoken_header_name] = api_key
