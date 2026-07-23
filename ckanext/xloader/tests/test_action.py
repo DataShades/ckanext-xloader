@@ -8,7 +8,40 @@ except ImportError:
 from ckan.plugins.toolkit import NotAuthorized
 from ckan.tests import helpers, factories
 
+from ckanext.xloader import action
 from ckanext.xloader.utils import get_xloader_user_apitoken
+
+
+def test_get_queued_resource_ids_uses_job_payload():
+    resource_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    jobs = [
+        mock.MagicMock(
+            args=[
+                {
+                    "job_type": "xloader_to_datastore",
+                    "metadata": {"resource_id": resource_id},
+                }
+            ],
+            description="ckanext.xloader.jobs.xloader_data_into_datastore({...",
+        ),
+        mock.MagicMock(args=[{"job_type": "test_job"}]),
+        mock.MagicMock(
+            args=[
+                {
+                    "job_type": "xloader_to_datastore",
+                    "metadata": {},
+                }
+            ]
+        ),
+        mock.MagicMock(args=[]),
+    ]
+
+    with mock.patch(
+        "ckanext.xloader.action.get_queue"
+    ) as get_queue_mock:
+        get_queue_mock.return_value.get_jobs.return_value = jobs
+
+        assert action._get_queued_resource_ids() == [resource_id]
 
 
 @pytest.mark.usefixtures("clean_db", "with_plugins")
