@@ -4,6 +4,7 @@ from __future__ import absolute_import
 import datetime
 import json
 import logging
+from typing import List, Union
 
 from ckan.lib.jobs import get_queue
 import ckan.lib.navl.dictization_functions
@@ -20,6 +21,31 @@ from . import interfaces as xloader_interfaces, jobs, db, utils
 log = logging.getLogger(__name__)
 
 _validate = ckan.lib.navl.dictization_functions.validate
+
+
+def _get_queued_resource_ids() -> List[Union[str, None]]:
+    resource_ids = []
+
+    for job in get_queue().get_jobs():
+        if not job.args:
+            continue
+
+        job_data = job.args[0]
+        if not isinstance(job_data, dict):
+            continue
+
+        if job_data.get('job_type') != 'xloader_to_datastore':
+            continue
+
+        metadata = job_data.get('metadata')
+        if not isinstance(metadata, dict):
+            continue
+
+        resource_id = metadata.get('resource_id')
+        if resource_id:
+            resource_ids.append(resource_id)
+
+    return resource_ids
 
 
 def xloader_submit(context, data_dict):
@@ -97,13 +123,7 @@ def xloader_submit(context, data_dict):
             datetime.timedelta(seconds=int(
                 config.get('ckanext.xloader.assume_task_stillborn_after', 5)))
         if existing_task.get('state') == 'pending':
-            import re  # here because it takes a moment to load
-            queued_res_ids = [
-                re.search(r"'resource_id': u?'([^']+)'",
-                          job.description).groups()[0]
-                for job in get_queue().get_jobs()
-                if 'xloader_to_datastore' in str(job)  # filter out test_job etc
-            ]
+            queued_res_ids = _get_queued_resource_ids()
             updated = parse_iso_date(existing_task['last_updated'])
             time_since_last_updated = datetime.datetime.utcnow() - updated
             if (res_id not in queued_res_ids
